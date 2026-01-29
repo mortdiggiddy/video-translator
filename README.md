@@ -270,12 +270,6 @@ pnpm test:watch
 - **pnpm** v9.14.1 - Package manager
 - **Docker** - Containerization
 
-## Related Projects
-
-- [nebula-services](../nebula-services) - Original monorepo
-- [robot-data](../nebula-services/apps/robot-data) - Service template
-- [mission-orchestrator](../nebula-services/apps/mission-orchestrator/src/orchestrator) - Temporal patterns
-
 ## License
 
 MIT
