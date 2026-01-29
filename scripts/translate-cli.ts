@@ -4,6 +4,7 @@
  * Video Translator CLI
  *
  * A command-line tool to translate videos with real-time progress tracking.
+ * This CLI uses only HTTP calls to the API - it does NOT connect directly to Temporal.
  *
  * Usage:
  *   pnpm translate --url https://example.com/video.mp4 --target Spanish
@@ -11,18 +12,20 @@
  *   pnpm translate --url https://example.com/video.mp4 --target German --hardcode
  */
 
+import * as dotenv from "dotenv"
+import * as path from "path"
+
+// Load .env file from project root
+dotenv.config({ path: path.resolve(__dirname, "../.env") })
+
 import { Command } from "commander"
 import * as chalk from "chalk"
 import * as cliProgress from "cli-progress"
-import { Connection, WorkflowClient } from "@temporalio/client"
 import * as fs from "fs"
-import * as path from "path"
 import * as http from "http"
 
 // Configuration
 const API_URL = process.env.API_URL || "http://localhost:3001"
-const TEMPORAL_ADDRESS = process.env.TEMPORAL_SERVER_ADDRESS || "localhost:7233"
-const TEMPORAL_NAMESPACE = process.env.TEMPORAL_NAMESPACE || "default"
 const POLL_INTERVAL_MS = 2000 // Poll every 2 seconds
 
 interface TranslateOptions {
@@ -42,20 +45,65 @@ interface WorkflowProgress {
   error?: string
 }
 
+interface WorkflowStatus {
+  workflowId: string
+  status: string
+  result?: {
+    success: boolean
+    transcription: string
+    translation: string
+    summary: string
+    keyPoints?: string[]
+    subtitlesPath: string
+    outputVideoPath?: string
+    artifactsDir?: string
+    processingTimeMs: number
+  }
+}
+
 /**
- * Create Temporal client connection
+ * Make HTTP request to API
  */
-async function createTemporalClient(): Promise<WorkflowClient> {
-  console.log(chalk.gray(`Connecting to Temporal at ${TEMPORAL_ADDRESS}...`))
+function httpRequest<T>(method: string, urlPath: string, body?: unknown): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlPath, API_URL)
 
-  const connection = await Connection.connect({
-    address: TEMPORAL_ADDRESS,
-    tls: false,
-  })
+    const options: http.RequestOptions = {
+      hostname: url.hostname,
+      port: url.port || 3001,
+      path: url.pathname,
+      method,
+      headers: body
+        ? {
+            "Content-Type": "application/json",
+            "Content-Length": Buffer.byteLength(JSON.stringify(body)),
+          }
+        : {},
+    }
 
-  return new WorkflowClient({
-    connection,
-    namespace: TEMPORAL_NAMESPACE,
+    const req = http.request(options, (res) => {
+      let data = ""
+      res.on("data", (chunk) => (data += chunk))
+      res.on("end", () => {
+        try {
+          const result = JSON.parse(data)
+          if (res.statusCode && res.statusCode >= 400) {
+            reject(new Error(result.message || `HTTP ${res.statusCode}`))
+          } else {
+            resolve(result as T)
+          }
+        } catch {
+          reject(new Error(`Invalid response: ${data}`))
+        }
+      })
+    })
+
+    req.on("error", reject)
+
+    if (body) {
+      req.write(JSON.stringify(body))
+    }
+    req.end()
   })
 }
 
@@ -63,171 +111,117 @@ async function createTemporalClient(): Promise<WorkflowClient> {
  * Start translation workflow via API
  */
 async function startTranslation(options: TranslateOptions): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const url = new URL(`${API_URL}/translate`)
-
-    if (options.file) {
-      // File upload method
-      const uploadUrl = new URL(`${API_URL}/translate/upload`)
-      const boundary = "----FormBoundary" + Math.random().toString(36).substring(2)
-
-      const filePath = path.resolve(options.file)
-      if (!fs.existsSync(filePath)) {
-        reject(new Error(`File not found: ${filePath}`))
-        return
-      }
-
-      const fileContent = fs.readFileSync(filePath)
-      const fileName = path.basename(filePath)
-
-      // Build multipart form data manually
-      let body = `--${boundary}\r\n`
-      body += `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n`
-      body += `Content-Type: application/octet-stream\r\n\r\n`
-
-      const bodyBuffer = Buffer.concat([Buffer.from(body), fileContent, Buffer.from(`\r\n--${boundary}\r\n`), Buffer.from(`Content-Disposition: form-data; name="targetLanguage"\r\n\r\n${options.target}\r\n`), options.source ? Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="sourceLanguage"\r\n\r\n${options.source}\r\n`) : Buffer.from(""), Buffer.from(`--${boundary}--\r\n`)])
-
-      const req = http.request(
-        {
-          hostname: uploadUrl.hostname,
-          port: uploadUrl.port || 3001,
-          path: uploadUrl.pathname,
-          method: "POST",
-          headers: {
-            "Content-Type": `multipart/form-data; boundary=${boundary}`,
-            "Content-Length": bodyBuffer.length,
-          },
-        },
-        (res) => {
-          let data = ""
-          res.on("data", (chunk) => (data += chunk))
-          res.on("end", () => {
-            try {
-              const result = JSON.parse(data)
-              if (result.workflowId) {
-                resolve(result.workflowId)
-              } else {
-                reject(new Error(result.message || "Failed to start workflow"))
-              }
-            } catch {
-              reject(new Error(`Invalid response: ${data}`))
-            }
-          })
-        },
-      )
-
-      req.on("error", reject)
-      req.write(bodyBuffer)
-      req.end()
-    } else if (options.url) {
-      // URL-based translation
-      const body = JSON.stringify({
-        videoUrl: options.url,
-        targetLanguage: options.target,
-        sourceLanguage: options.source,
-        outputOptions: {
-          hardcodeSubtitles: options.hardcode ?? false,
-          generateVideo: true,
-        },
-      })
-
-      const req = http.request(
-        {
-          hostname: url.hostname,
-          port: url.port || 3001,
-          path: url.pathname,
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Content-Length": Buffer.byteLength(body),
-          },
-        },
-        (res) => {
-          let data = ""
-          res.on("data", (chunk) => (data += chunk))
-          res.on("end", () => {
-            try {
-              const result = JSON.parse(data)
-              if (result.workflowId) {
-                resolve(result.workflowId)
-              } else {
-                reject(new Error(result.message || "Failed to start workflow"))
-              }
-            } catch {
-              reject(new Error(`Invalid response: ${data}`))
-            }
-          })
-        },
-      )
-
-      req.on("error", reject)
-      req.write(body)
-      req.end()
-    } else {
-      reject(new Error("Either --url or --file must be provided"))
+  if (options.file) {
+    // For file upload, we need multipart form data
+    return startTranslationWithFile(options)
+  } else if (options.url) {
+    // URL-based translation
+    const body = {
+      videoUrl: options.url,
+      targetLanguage: options.target,
+      sourceLanguage: options.source,
+      outputOptions: {
+        hardcodeSubtitles: options.hardcode ?? false,
+        generateVideo: true,
+      },
     }
+
+    const result = await httpRequest<{ workflowId: string }>("POST", "/translate", body)
+    return result.workflowId
+  } else {
+    throw new Error("Either --url or --file must be provided")
+  }
+}
+
+/**
+ * Start translation with file upload via API
+ */
+async function startTranslationWithFile(options: TranslateOptions): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = new URL("/translate/upload", API_URL)
+    const boundary = "----FormBoundary" + Math.random().toString(36).substring(2)
+
+    const filePath = path.resolve(options.file!)
+    if (!fs.existsSync(filePath)) {
+      reject(new Error(`File not found: ${filePath}`))
+      return
+    }
+
+    const fileContent = fs.readFileSync(filePath)
+    const fileName = path.basename(filePath)
+
+    // Build multipart form data manually
+    let body = `--${boundary}\r\n`
+    body += `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n`
+    body += `Content-Type: application/octet-stream\r\n\r\n`
+
+    const bodyBuffer = Buffer.concat([Buffer.from(body), fileContent, Buffer.from(`\r\n--${boundary}\r\n`), Buffer.from(`Content-Disposition: form-data; name="targetLanguage"\r\n\r\n${options.target}\r\n`), options.source ? Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="sourceLanguage"\r\n\r\n${options.source}\r\n`) : Buffer.from(""), Buffer.from(`--${boundary}--\r\n`)])
+
+    const req = http.request(
+      {
+        hostname: url.hostname,
+        port: url.port || 3001,
+        path: url.pathname,
+        method: "POST",
+        headers: {
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+          "Content-Length": bodyBuffer.length,
+        },
+      },
+      (res) => {
+        let data = ""
+        res.on("data", (chunk) => (data += chunk))
+        res.on("end", () => {
+          try {
+            const result = JSON.parse(data)
+            if (result.workflowId) {
+              resolve(result.workflowId)
+            } else {
+              reject(new Error(result.message || "Failed to start workflow"))
+            }
+          } catch {
+            reject(new Error(`Invalid response: ${data}`))
+          }
+        })
+      },
+    )
+
+    req.on("error", reject)
+    req.write(bodyBuffer)
+    req.end()
   })
 }
 
 /**
- * Query workflow progress
+ * Query workflow progress via API
  */
-async function queryProgress(client: WorkflowClient, workflowId: string): Promise<WorkflowProgress> {
+async function queryProgress(workflowId: string): Promise<WorkflowProgress> {
   try {
-    const handle = client.getHandle(workflowId)
-    const description = await handle.describe()
-
-    if (description.status.name === "COMPLETED") {
-      return {
-        currentStep: 7,
-        totalSteps: 7,
-        stepName: "Completed",
-        percentComplete: 100,
-        status: "completed",
-      }
-    }
-
-    if (description.status.name === "TIMED_OUT" || description.status.name === "CANCELLED") {
-      return {
-        currentStep: 0,
-        totalSteps: 7,
-        stepName: description.status.name,
-        percentComplete: 0,
-        status: "failed",
-        error: `Workflow ${description.status.name.toLowerCase()}`,
-      }
-    }
-
-    // Query the workflow for progress
-    try {
-      const progress = await handle.query<WorkflowProgress>("getProgress")
-      return progress
-    } catch {
-      // Query might fail initially - return default running state
-      return {
-        currentStep: 0,
-        totalSteps: 7,
-        stepName: "Initializing...",
-        percentComplete: 0,
-        status: "running",
-      }
-    }
+    return await httpRequest<WorkflowProgress>("GET", `/translate/${workflowId}/progress`)
   } catch (error) {
+    // If query fails, return unknown state
     return {
       currentStep: 0,
       totalSteps: 7,
-      stepName: "Error",
+      stepName: "Connecting...",
       percentComplete: 0,
-      status: "failed",
-      error: error instanceof Error ? error.message : "Unknown error",
+      status: "running",
+      error: error instanceof Error ? error.message : "Query failed",
     }
   }
 }
 
 /**
+ * Get workflow status via API
+ */
+async function getWorkflowStatus(workflowId: string): Promise<WorkflowStatus> {
+  return httpRequest<WorkflowStatus>("GET", `/translate/${workflowId}`)
+}
+
+/**
  * Wait for workflow completion with progress bar
  */
-async function waitForCompletion(client: WorkflowClient, workflowId: string): Promise<void> {
+async function waitForCompletion(workflowId: string): Promise<void> {
   console.log(chalk.cyan("\n⏳ Translation Progress\n"))
 
   const progressBar = new cliProgress.SingleBar(
@@ -246,11 +240,8 @@ async function waitForCompletion(client: WorkflowClient, workflowId: string): Pr
     stepName: "Starting...",
   })
 
-  let lastProgress: WorkflowProgress | null = null
-
   while (true) {
-    const progress = await queryProgress(client, workflowId)
-    lastProgress = progress
+    const progress = await queryProgress(workflowId)
 
     progressBar.update(progress.percentComplete, {
       currentStep: progress.currentStep,
@@ -278,34 +269,35 @@ async function waitForCompletion(client: WorkflowClient, workflowId: string): Pr
     await sleep(POLL_INTERVAL_MS)
   }
 
-  // Get final result
-  const handle = client.getHandle(workflowId)
-  const result = await handle.result()
+  // Get final result via API
+  const status = await getWorkflowStatus(workflowId)
 
-  console.log(chalk.bold("Results:"))
-  console.log(chalk.gray("─".repeat(50)))
-  console.log(chalk.white(`Workflow ID: ${chalk.cyan(workflowId)}`))
-  if (result.artifactsDir) {
-    console.log(chalk.white(`Output Directory: ${chalk.cyan(result.artifactsDir)}`))
+  if (status.result) {
+    console.log(chalk.bold("Results:"))
+    console.log(chalk.gray("─".repeat(50)))
+    console.log(chalk.white(`Workflow ID: ${chalk.cyan(workflowId)}`))
+    if (status.result.artifactsDir) {
+      console.log(chalk.white(`Output Directory: ${chalk.cyan(status.result.artifactsDir)}`))
+    }
+    if (status.result.outputVideoPath) {
+      console.log(chalk.white(`Translated Video: ${chalk.cyan(status.result.outputVideoPath)}`))
+    }
+    console.log(chalk.white(`Processing Time: ${chalk.cyan(formatDuration(status.result.processingTimeMs))}`))
+    console.log(chalk.gray("─".repeat(50)))
+
+    // Show summary
+    console.log(chalk.bold("\nSummary:"))
+    console.log(chalk.gray(status.result.summary))
+
+    if (status.result.keyPoints && status.result.keyPoints.length > 0) {
+      console.log(chalk.bold("\nKey Points:"))
+      status.result.keyPoints.forEach((point: string, idx: number) => {
+        console.log(chalk.gray(`  ${idx + 1}. ${point}`))
+      })
+    }
+
+    console.log("")
   }
-  if (result.outputVideoPath) {
-    console.log(chalk.white(`Translated Video: ${chalk.cyan(result.outputVideoPath)}`))
-  }
-  console.log(chalk.white(`Processing Time: ${chalk.cyan(formatDuration(result.processingTimeMs))}`))
-  console.log(chalk.gray("─".repeat(50)))
-
-  // Show summary
-  console.log(chalk.bold("\nSummary:"))
-  console.log(chalk.gray(result.summary))
-
-  if (result.keyPoints && result.keyPoints.length > 0) {
-    console.log(chalk.bold("\nKey Points:"))
-    result.keyPoints.forEach((point: string, idx: number) => {
-      console.log(chalk.gray(`  ${idx + 1}. ${point}`))
-    })
-  }
-
-  console.log("")
 }
 
 /**
@@ -374,14 +366,13 @@ program
       console.log(chalk.white(`Subtitle Mode: ${chalk.cyan(options.hardcode ? "Hardcoded (burned-in)" : "Softcoded (selectable)")}`))
       console.log(chalk.gray("─".repeat(50)))
 
-      // Start translation
+      // Start translation via API
       console.log(chalk.gray("\nStarting translation workflow..."))
       const workflowId = await startTranslation(options)
       console.log(chalk.green(`Workflow started: ${chalk.cyan(workflowId)}`))
 
-      // Connect to Temporal and wait for completion
-      const client = await createTemporalClient()
-      await waitForCompletion(client, workflowId)
+      // Wait for completion (polling API for progress)
+      await waitForCompletion(workflowId)
     } catch (error) {
       console.log(chalk.red(`\n❌ Error: ${error instanceof Error ? error.message : error}`))
       process.exit(1)

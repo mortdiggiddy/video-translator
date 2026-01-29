@@ -2,7 +2,7 @@ import { proxyActivities, defineQuery, setHandler } from "@temporalio/workflow"
 import type * as activities from "../activities"
 
 // Proxy activities to use within workflow
-const { extractAudio, transcribeAudio, translateText, generateSummary, generateSubtitles, generateOutputVideo, saveWorkflowArtifacts } = proxyActivities<typeof activities>({
+const { extractAudio, transcribeAudio, translateText, generateSummary, generateSubtitles, generateOutputVideo, saveWorkflowArtifacts, cleanupTempFilesActivity } = proxyActivities<typeof activities>({
   startToCloseTimeout: "10 minutes",
   retry: {
     maximumAttempts: 3,
@@ -133,6 +133,7 @@ export async function translationWorkflow(input: TranslationWorkflowInput): Prom
       percentComplete: 95,
     }
     console.log(`Step ${generateVideo ? 7 : 6}: Saving artifacts...`)
+
     const artifactResult = await saveWorkflowArtifacts({
       workflowId: input.workflowId || `translation-${Date.now()}`,
       transcription: transcription.text,
@@ -146,6 +147,10 @@ export async function translationWorkflow(input: TranslationWorkflowInput): Prom
       outputVideoPath,
     })
     artifactsDir = artifactResult.artifactsDir
+
+    // Cleanup temporary files
+    console.log("Cleaning up temporary files...")
+    await cleanupTempFilesActivity()
 
     const processingTimeMs = Date.now() - startTime
 

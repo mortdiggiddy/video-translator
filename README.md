@@ -79,13 +79,14 @@ pnpm start:prod
 
 ## API Endpoints
 
-| Method | Endpoint            | Description                |
-| ------ | ------------------- | -------------------------- |
-| GET    | `/`                 | Service information        |
-| GET    | `/health`           | Health check               |
-| POST   | `/translate`        | Start translation (URL)    |
-| POST   | `/translate/upload` | Start translation (Upload) |
-| GET    | `/translate/:id`    | Get workflow status        |
+| Method | Endpoint                  | Description                     |
+| ------ | ------------------------- | ------------------------------- |
+| GET    | `/`                       | Service information             |
+| GET    | `/health`                 | Health check                    |
+| POST   | `/translate`              | Start translation (URL)         |
+| POST   | `/translate/upload`       | Start translation (Upload)      |
+| GET    | `/translate/:id`          | Get workflow status & result    |
+| GET    | `/translate/:id/progress` | Get real-time workflow progress |
 
 ## Usage Examples
 

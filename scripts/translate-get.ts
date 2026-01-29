@@ -10,13 +10,20 @@
  *   pnpm translate:get <workflowId> -o ./downloads
  */
 
+import * as dotenv from "dotenv"
+import * as path from "path"
+
+// Load .env file from project root
+dotenv.config({ path: path.resolve(__dirname, "../.env") })
+
 import { Command } from "commander"
 import * as chalk from "chalk"
 import * as fs from "fs"
-import * as path from "path"
 
-// Configuration
-const OUTPUT_DIR = process.env.OUTPUT_DIR || "/output/video-translator"
+// Configuration - defaults work for local dev with docker-compose volume mount
+// OUTPUT_DIR in .env is for container (/output/video-translator)
+// For host CLI, use relative path ./output which is the volume mount target
+const OUTPUT_DIR = process.env.CLI_OUTPUT_DIR || "./output"
 
 interface GetOptions {
   output: string
