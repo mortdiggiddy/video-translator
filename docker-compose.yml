@@ -1,0 +1,108 @@
+version: "3.8"
+
+services:
+  # ==========================================
+  # Video Translator Service
+  # ==========================================
+  translator:
+    container_name: video-translator
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    command: pnpm start:dev
+    ports:
+      - "3001:3001"
+    env_file:
+      - .env
+    volumes:
+      # Mount source for hot reload in development
+      - ./src:/usr/src/app/src
+      - ./.env:/usr/src/app/.env
+      # Prevent overwriting node_modules
+      - /usr/src/app/node_modules
+    depends_on:
+      temporal:
+        condition: service_healthy
+    networks:
+      - video-translator
+
+  # ==========================================
+  # Temporal Server
+  # ==========================================
+  temporal:
+    container_name: temporal
+    depends_on:
+      - temporal-db
+    env_file:
+      - .env
+    image: temporalio/auto-setup:${TEMPORAL_VERSION}
+    ports:
+      - "7233:7233"
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    volumes:
+      - ./scripts/temporal/dynamicconfig:/etc/temporal/config/dynamicconfig
+    networks:
+      - video-translator
+
+  # ==========================================
+  # Temporal Admin Tools
+  # ==========================================
+  temporal-admin-tools:
+    container_name: temporal-admin-tools
+    depends_on:
+      - temporal
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CLI_ADDRESS=temporal:7233
+    image: temporalio/admin-tools:${TEMPORAL_ADMINTOOLS_VERSION}
+    stdin_open: true
+    tty: true
+    networks:
+      - video-translator
+
+  # ==========================================
+  # Temporal UI
+  # ==========================================
+  temporal-ui:
+    container_name: temporal-ui
+    depends_on:
+      - temporal
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=${TEMPORAL_CORS_ORIGINS:-http://localhost:8089}
+      - TEMPORAL_FORWARD_HEADERS=true
+    image: temporalio/ui:${TEMPORAL_UI_VERSION}
+    ports:
+      - "8089:8080"
+    networks:
+      - video-translator
+
+  # ==========================================
+  # Temporal Database (PostgreSQL)
+  # ==========================================
+  temporal-db:
+    container_name: temporal-db
+    image: postgres:${POSTGRESQL_VERSION:-16}-bullseye
+    restart: always
+    ports:
+      - "${DB_EXTERNAL_PORT:-5437}:5432"
+    env_file:
+      - .env
+    volumes:
+      - temporal-db-data:/var/lib/postgresql/data
+    networks:
+      - video-translator
+
+networks:
+  video-translator:
+    driver: bridge
+
+volumes:
+  temporal-db-data:

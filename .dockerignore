@@ -1,0 +1,44 @@
+# Dependencies
+
+node_modules
+.pnpm-store
+
+# Build output
+
+dist
+build
+
+# Development
+
+.git
+.gitignore
+\*.md
+!README.md
+
+# Environment files
+
+.env
+.env.\*
+!.env.example
+
+# Logs
+
+logs
+\*.log
+
+# IDE
+
+.vscode
+.idea
+_.swp
+_.swo
+
+# Test
+
+coverage
+
+# Temporary
+
+.temp
+.tmp
+/tmp
