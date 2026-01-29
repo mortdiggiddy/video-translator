@@ -26,3 +26,6 @@ lerna-debug.log*
 # Output directory (generated files)
 /output
 /translation-output
+
+# tests
+*.mp4

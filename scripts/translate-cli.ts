@@ -12,14 +12,13 @@
  *   pnpm translate --url https://example.com/video.mp4 --target German --hardcode
  */
 
-import * as dotenv from "dotenv"
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") })
+
 import * as path from "path"
-
-// Load .env file from project root
-dotenv.config({ path: path.resolve(__dirname, "../.env") })
-
 import { Command } from "commander"
-import * as chalk from "chalk"
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const chalk = require("chalk")
 import * as cliProgress from "cli-progress"
 import * as fs from "fs"
 import * as http from "http"
@@ -134,6 +133,29 @@ async function startTranslation(options: TranslateOptions): Promise<string> {
 }
 
 /**
+ * Get MIME type based on file extension
+ */
+function getMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase()
+  const mimeTypes: Record<string, string> = {
+    ".mp4": "video/mp4",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+    ".webm": "video/webm",
+    ".flv": "video/x-flv",
+    ".wmv": "video/x-ms-wmv",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+    ".aac": "audio/aac",
+  }
+  return mimeTypes[ext] || "application/octet-stream"
+}
+
+/**
  * Start translation with file upload via API
  */
 async function startTranslationWithFile(options: TranslateOptions): Promise<string> {
@@ -149,11 +171,12 @@ async function startTranslationWithFile(options: TranslateOptions): Promise<stri
 
     const fileContent = fs.readFileSync(filePath)
     const fileName = path.basename(filePath)
+    const mimeType = getMimeType(filePath)
 
     // Build multipart form data manually
     let body = `--${boundary}\r\n`
     body += `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n`
-    body += `Content-Type: application/octet-stream\r\n\r\n`
+    body += `Content-Type: ${mimeType}\r\n\r\n`
 
     const bodyBuffer = Buffer.concat([Buffer.from(body), fileContent, Buffer.from(`\r\n--${boundary}\r\n`), Buffer.from(`Content-Disposition: form-data; name="targetLanguage"\r\n\r\n${options.target}\r\n`), options.source ? Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="sourceLanguage"\r\n\r\n${options.source}\r\n`) : Buffer.from(""), Buffer.from(`--${boundary}--\r\n`)])
 

@@ -54,7 +54,7 @@ export class TranslateVideoDto {
   @IsNotEmpty({ message: "targetLanguage is required" })
   targetLanguage: string
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: "Source language of the video (optional, auto-detected if not provided)",
     example: "English",
     default: "English",
@@ -62,6 +62,14 @@ export class TranslateVideoDto {
   @IsString()
   @IsOptional()
   sourceLanguage?: string
+
+  @ApiPropertyOptional({
+    description: "Original filename (used for workflow ID, auto-extracted from URL if not provided)",
+    example: "my-video.mp4",
+  })
+  @IsString()
+  @IsOptional()
+  fileName?: string
 
   @ApiPropertyOptional({
     description: "Output options for video generation",

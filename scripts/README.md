@@ -58,6 +58,13 @@ pnpm translate -u https://example.com/video.mp4 -t Spanish -s English
 
 \*Either `--url` or `--file` is required.
 
+**Workflow ID Format:**
+
+Workflow IDs use the naming convention: `{filename}-{targetLanguage}-{uuid}`
+
+- **File uploads**: Uses the original filename (e.g., `myvideo-french-a1b2c3d4-...`)
+- **URL submissions**: Extracts filename from URL path (e.g., `video-spanish-e5f6g7h8-...`)
+
 **Sample Output:**
 
 ```
@@ -70,7 +77,7 @@ Subtitle Mode: Softcoded (selectable)
 ──────────────────────────────────────────────────
 
 Starting translation workflow...
-Workflow started: translation-1706518800000-abc123
+Workflow started: video-spanish-a1b2c3d4-e5f6-7890-abcd-ef1234567890
 
 ⏳ Translation Progress
 
@@ -80,8 +87,8 @@ Workflow started: translation-1706518800000-abc123
 
 Results:
 ──────────────────────────────────────────────────
-Workflow ID: translation-1706518800000-abc123
-Output Directory: /output/video-translator/translation-1706518800000-abc123
+Workflow ID: video-spanish-a1b2c3d4-e5f6-7890-abcd-ef1234567890
+Output Directory: /output/video-translator/video-spanish-a1b2c3d4-e5f6-7890-abcd-ef1234567890
 Translated Video: /output/video-translator/.../translated_video.mp4
 Processing Time: 2m 34s
 ──────────────────────────────────────────────────
@@ -187,20 +194,20 @@ curl -X POST http://localhost:3001/translate \
       "generateVideo": true
     }
   }'
-# Returns: {"workflowId": "translation-xxx", "status": "started"}
+# Returns: {"workflowId": "video-spanish-a1b2c3d4-...", "status": "started"}
 ```
 
 ### Check Progress
 
 ```bash
-curl http://localhost:3001/translate/translation-xxx/progress
+curl http://localhost:3001/translate/video-spanish-a1b2c3d4-.../progress
 # Returns: {"currentStep": 3, "totalSteps": 7, "stepName": "Translating text", ...}
 ```
 
 ### Get Final Result
 
 ```bash
-curl http://localhost:3001/translate/translation-xxx
+curl http://localhost:3001/translate/video-spanish-a1b2c3d4-...
 # Returns full result with output paths
 ```
 
@@ -208,7 +215,7 @@ curl http://localhost:3001/translate/translation-xxx
 
 ```bash
 # Files are available via docker volume mount
-ls ./output/translation-xxx/
+ls ./output/video-spanish-a1b2c3d4-.../
 # subtitles.srt subtitles.vtt metadata.json translated_video.mp4
 ```
 

@@ -10,14 +10,13 @@
  *   pnpm translate:get <workflowId> -o ./downloads
  */
 
-import * as dotenv from "dotenv"
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") })
+
 import * as path from "path"
-
-// Load .env file from project root
-dotenv.config({ path: path.resolve(__dirname, "../.env") })
-
 import { Command } from "commander"
-import * as chalk from "chalk"
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const chalk = require("chalk")
 import * as fs from "fs"
 
 // Configuration - defaults work for local dev with docker-compose volume mount

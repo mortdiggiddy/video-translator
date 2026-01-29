@@ -105,10 +105,12 @@ export class TranslatorController {
     }
 
     // Convert file upload to video URL DTO
+    // Pass original filename for workflow ID generation
     const translateDto: TranslateVideoDto = {
       videoUrl: file.path,
       targetLanguage: dto.targetLanguage,
       sourceLanguage: dto.sourceLanguage,
+      fileName: file.originalname, // Pass original filename for workflow ID
     }
 
     return this.translatorService.startTranslation(translateDto)

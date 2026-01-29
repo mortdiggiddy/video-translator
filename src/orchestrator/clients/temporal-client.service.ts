@@ -4,6 +4,7 @@ import { NativeConnection, Worker, bundleWorkflowCode, WorkflowBundleWithSourceM
 import { ConfigService } from "@nestjs/config"
 import * as path from "path"
 import * as fs from "fs"
+import { v4 as uuidv4 } from "uuid"
 
 @Injectable()
 export class TemporalClientService implements OnModuleInit, OnModuleDestroy, OnApplicationShutdown {
@@ -85,12 +86,16 @@ export class TemporalClientService implements OnModuleInit, OnModuleDestroy, OnA
     videoUrl: string
     targetLanguage: string
     sourceLanguage?: string
+    fileName?: string
     outputOptions?: {
       hardcodeSubtitles?: boolean
       generateVideo?: boolean
     }
   }): Promise<{ workflowId: string; status: string }> {
-    const workflowId = `translation-${Date.now()}-${Math.random().toString(36).substring(7)}`
+    // Generate workflow ID: filename-targetlanguage-uuid
+    const fileBaseName = this.extractBaseName(input.videoUrl, input.fileName)
+    const targetLang = input.targetLanguage.toLowerCase().replace(/\s+/g, "-")
+    const workflowId = `${fileBaseName}-${targetLang}-${uuidv4()}`
 
     this.logger.log(`Starting translation workflow: ${workflowId}`)
 
@@ -109,6 +114,38 @@ export class TemporalClientService implements OnModuleInit, OnModuleDestroy, OnA
     return {
       workflowId: handle.workflowId,
       status: "started",
+    }
+  }
+
+  /**
+   * Extract base name from URL or filename (without extension)
+   */
+  private extractBaseName(videoUrl: string, fileName?: string): string {
+    // If filename provided, use it
+    if (fileName) {
+      return fileName
+        .replace(/\.[^/.]+$/, "")
+        .replace(/[^a-zA-Z0-9-_]/g, "-")
+        .toLowerCase()
+    }
+
+    // Extract from URL
+    try {
+      const url = new URL(videoUrl)
+      const pathname = url.pathname
+      const filename = pathname.split("/").pop() || "video"
+      return filename
+        .replace(/\.[^/.]+$/, "")
+        .replace(/[^a-zA-Z0-9-_]/g, "-")
+        .toLowerCase()
+    } catch {
+      // If not a valid URL, try to extract as file path
+      const parts = videoUrl.split("/")
+      const filename = parts[parts.length - 1] || "video"
+      return filename
+        .replace(/\.[^/.]+$/, "")
+        .replace(/[^a-zA-Z0-9-_]/g, "-")
+        .toLowerCase()
     }
   }
 

@@ -120,7 +120,7 @@ Subtitle Mode: Softcoded (selectable)
 ──────────────────────────────────────────────────
 
 Starting translation workflow...
-Workflow started: translation-1706518800000-abc123
+Workflow started: video-spanish-a1b2c3d4-e5f6-7890-abcd-ef1234567890
 
 ⏳ Translation Progress
 
@@ -162,6 +162,27 @@ curl -X POST http://localhost:3001/translate/upload \
 curl http://localhost:3001/translate/{workflowId}
 ```
 
+### Workflow ID Naming Convention
+
+Workflow IDs are automatically generated using the format:
+
+```
+{filename}-{targetLanguage}-{uuid}
+```
+
+**Examples:**
+
+| Input                                                  | Workflow ID                           |
+| ------------------------------------------------------ | ------------------------------------- |
+| File upload: `JillTaylor_TED.mp4` → Spanish            | `jilltaylor_ted-spanish-a1b2c3d4-...` |
+| URL: `https://example.com/Interview.mp4` → French      | `interview-french-e5f6g7h8-...`       |
+| URL: `https://cdn.site.com/meeting_notes.mov` → German | `meeting_notes-german-i9j0k1l2-...`   |
+
+The filename is extracted from:
+
+1. **File uploads**: The original filename
+2. **URL submissions**: The last path segment before the file extension
+
 ### Download Workflow Output (CLI)
 
 ```bash
@@ -175,7 +196,7 @@ pnpm translate:get <workflowId> --output ./my-translations/
 
 ```json
 {
-  "workflowId": "translation-1706518800000-abc123",
+  "workflowId": "video-spanish-a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "status": "started"
 }
 ```
@@ -184,7 +205,7 @@ pnpm translate:get <workflowId> --output ./my-translations/
 
 ```json
 {
-  "workflowId": "translation-1706518800000-abc123",
+  "workflowId": "video-spanish-a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "status": "RUNNING"
 }
 ```
@@ -193,7 +214,7 @@ pnpm translate:get <workflowId> --output ./my-translations/
 
 ```json
 {
-  "workflowId": "translation-1706518800000-abc123",
+  "workflowId": "video-spanish-a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "status": "COMPLETED",
   "result": {
     "success": true,
@@ -201,9 +222,9 @@ pnpm translate:get <workflowId> --output ./my-translations/
     "translation": "Hola, este es un video de prueba...",
     "summary": "A brief test video with greeting.",
     "keyPoints": ["Point 1", "Point 2", "Point 3"],
-    "subtitlesPath": "/output/video-translator/translation-xxx/subtitles.srt",
-    "outputVideoPath": "/output/video-translator/translation-xxx/translated_video.mp4",
-    "artifactsDir": "/output/video-translator/translation-xxx",
+    "subtitlesPath": "/output/video-translator/video-spanish-a1b2c3d4.../subtitles.srt",
+    "outputVideoPath": "/output/video-translator/video-spanish-a1b2c3d4.../translated_video.mp4",
+    "artifactsDir": "/output/video-translator/video-spanish-a1b2c3d4...",
     "processingTimeMs": 45000
   }
 }
