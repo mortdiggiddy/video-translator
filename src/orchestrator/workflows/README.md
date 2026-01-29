@@ -48,15 +48,15 @@ flowchart TB
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Extract Audio Pipeline                    │
+│                    Extract Audio Pipeline                   │
 ├─────────────────────────────────────────────────────────────┤
 │ 1. Check if input is URL or local path                      │
 │    └─> If URL: Download to /tmp/video-translator/           │
 │                                                             │
 │ 2. Detect file type by extension                            │
-│    ├─> Video (.mp4, .mov, .avi, .mkv, .webm, .flv, .wmv)   │
+│    ├─> Video (.mp4, .mov, .avi, .mkv, .webm, .flv, .wmv)    │
 │    │   └─> Run FFmpeg to extract audio                      │
-│    └─> Audio (.mp3, .wav, .m4a, .ogg, .flac, .aac)         │
+│    └─> Audio (.mp3, .wav, .m4a, .ogg, .flac, .aac)          │
 │        └─> Pass through directly                            │
 │                                                             │
 │ 3. FFmpeg conversion settings:                              │
@@ -74,7 +74,7 @@ flowchart TB
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                OpenAI Whisper Transcription                  │
+│                OpenAI Whisper Transcription                 │
 ├─────────────────────────────────────────────────────────────┤
 │ API Call: openai.audio.transcriptions.create()              │
 │                                                             │
@@ -89,8 +89,8 @@ flowchart TB
 │    text: "Full transcription text...",                      │
 │    language: "en",                                          │
 │    segments: [                                              │
-│      { start: 0.0, end: 4.5, text: "First segment..." },   │
-│      { start: 4.5, end: 9.2, text: "Second segment..." }   │
+│      { start: 0.0, end: 4.5, text: "First segment..." },    │
+│      { start: 4.5, end: 9.2, text: "Second segment..." }    │
 │    ]                                                        │
 │  }                                                          │
 └─────────────────────────────────────────────────────────────┘
@@ -103,13 +103,13 @@ flowchart TB
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    GPT-4 Translation                         │
+│                    GPT-4 Translation                        │
 ├─────────────────────────────────────────────────────────────┤
 │ API Call: openai.chat.completions.create()                  │
 │                                                             │
 │ System Prompt:                                              │
-│  "You are a professional translator. Translate from        │
-│   {source} to {target}. Preserve meaning, tone, style.     │
+│  "You are a professional translator. Translate from         │
+│   {source} to {target}. Preserve meaning, tone, style.      │
 │   Only output the translated text."                         │
 │                                                             │
 │ Parameters:                                                 │
@@ -133,12 +133,12 @@ flowchart TB
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                  GPT-4 Summarization                         │
+│                  GPT-4 Summarization                        │
 ├─────────────────────────────────────────────────────────────┤
 │ API Call: openai.chat.completions.create()                  │
 │                                                             │
 │ System Prompt:                                              │
-│  "Create a concise summary in {targetLanguage}.            │
+│  "Create a concise summary in {targetLanguage}.             │
 │   Extract 3-5 key points.                                   │
 │   Format as JSON: {summary, keyPoints[]}"                   │
 │                                                             │
@@ -150,7 +150,7 @@ flowchart TB
 │ Returns:                                                    │
 │  {                                                          │
 │    summary: "Este video trata sobre...",                    │
-│    keyPoints: ["Punto 1", "Punto 2", "Punto 3"],           │
+│    keyPoints: ["Punto 1", "Punto 2", "Punto 3"],            │
 │    language: "es"                                           │
 │  }                                                          │
 └─────────────────────────────────────────────────────────────┘

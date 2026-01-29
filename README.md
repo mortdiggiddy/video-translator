@@ -261,6 +261,109 @@ pnpm test:watch
 - **Exceptions**: Extend `TranslatorException` base class
 - **DTOs**: Use class-validator + Swagger decorators
 
+## Why Temporal? Cost/Benefit Analysis
+
+### The Problem: Long-Running AI Workflows
+
+Video translation involves multiple long-running operations:
+
+1. **Video download** - Minutes for large files
+2. **FFmpeg audio extraction** - CPU-intensive processing
+3. **Whisper transcription** - 5-10 minutes for 30+ minute videos
+4. **GPT-4 translation** - Multiple API calls with rate limits
+5. **Subtitle generation** - Additional API processing
+
+Traditional REST APIs struggle with this because:
+
+- HTTP requests timeout (typically 30-60 seconds)
+- Server restarts lose in-progress work
+- API rate limits require retry logic
+- No visibility into where a job failed
+
+### Why Temporal is a Good Fit
+
+| Challenge                 | Temporal Solution                              |
+| ------------------------- | ---------------------------------------------- |
+| **Long operations**       | Workflows can run for hours/days - no timeouts |
+| **Server crashes**        | Automatic resume from last checkpoint          |
+| **API rate limits**       | Built-in retry with exponential backoff        |
+| **Debugging failures**    | Full execution history in web UI               |
+| **Complex orchestration** | Manages state machine for 5-step pipeline      |
+
+**Temporal's Durable Execution Model:**
+
+```
+Without Temporal:
+┌──────┐    ┌──────┐    ┌──────┐    ┌──────┐    ┌──────┐
+│Step 1│ →  │Step 2│ →  │Step 3│ →  │Step 4│ →  │Step 5│
+└──────┘    └──────┘    └──────┘    └──────┘    └──────┘
+                              ❌ Server crash = Start over
+
+With Temporal:
+┌──────┐    ┌──────┐    ┌──────┐    ┌──────┐    ┌──────┐
+│Step 1│ →  │Step 2│ →  │Step 3│ →  │Step 4│ →  │Step 5│
+└──────┘    └──────┘    └──────┘    └──────┘    └──────┘
+    ✓           ✓           ✓
+                              ❌ Server crash
+                              ✅ Resume at Step 4
+```
+
+### Comparison with Alternatives
+
+| Factor                    | Temporal                 | BullMQ + Redis          | Plain Async              |
+| ------------------------- | ------------------------ | ----------------------- | ------------------------ |
+| **Automatic retries**     | ✅ Built-in with backoff | ✅ Configurable         | ❌ Manual implementation |
+| **Resume after crash**    | ✅ From exact checkpoint | ⚠️ Restart entire job   | ❌ Lost work             |
+| **Long-running (>30min)** | ✅ Designed for it       | ⚠️ Possible with config | ❌ Timeout issues        |
+| **Visibility/debugging**  | ✅ Excellent web UI      | ⚠️ Basic dashboard      | ❌ Custom logging needed |
+| **State management**      | ✅ Automatic             | ⚠️ Manual               | ❌ Manual                |
+| **Infrastructure cost**   | ❌ 4 containers          | ⚠️ 1 container (Redis)  | ✅ None                  |
+| **Learning curve**        | ❌ High                  | ⚠️ Medium               | ✅ Low                   |
+| **Team familiarity**      | ❌ Specialized knowledge | ✅ Common pattern       | ✅ Standard JS           |
+
+### When to Use Temporal (This Project)
+
+✅ **Good fit when:**
+
+- Videos longer than 10 minutes
+- Reliability is critical (paid service, can't lose translations)
+- Need observability without building custom dashboards
+- Planning to add complexity (human review, parallel processing)
+- Multiple environments (dev/staging/prod) benefit from Temporal Cloud
+
+⚠️ **Consider simpler alternatives when:**
+
+- Prototype/MVP stage only
+- Videos are consistently short (<5 minutes)
+- Single developer, want minimal infrastructure
+- Budget constraints (Temporal Cloud costs, or ops time for self-hosted)
+
+### This Project's Configuration
+
+```yaml
+# Activities are configured with:
+- startToCloseTimeout: 5 minutes
+- maximumAttempts: 3 retries
+- Automatic exponential backoff on failure
+```
+
+Each of the 5 activities is checkpointed. If GPT-4 returns an error during translation:
+
+1. Temporal automatically retries up to 3 times
+2. If all retries fail, the workflow pauses
+3. You can fix the issue and replay from the failed step
+4. Successful steps (download, extraction, transcription) are NOT re-run
+
+### Monitoring & Debugging
+
+Access Temporal UI at `http://localhost:8089` to:
+
+- View all workflows and their real-time status
+- Inspect input/output of each activity
+- See retry attempts and error messages
+- Replay failed workflows
+- Terminate stuck workflows
+
 ## Tech Stack
 
 - **NestJS** v10.4.x - Backend framework
