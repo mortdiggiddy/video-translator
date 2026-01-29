@@ -141,17 +141,26 @@ export function downloadFile(url: string, outputPath: string): Promise<string> {
 
 /**
  * Extract audio from video file using ffmpeg
+ *
+ * Audio is compressed to reduce file size for faster Whisper API uploads:
+ * - 64kbps bitrate (vs 192k) - sufficient for speech
+ * - Mono channel (vs stereo) - halves the data
+ * - 16kHz sample rate (vs 44.1kHz) - Whisper internally uses 16kHz anyway
+ *
+ * This reduces file size by ~6x compared to previous settings,
+ * significantly reducing upload time and ECONNRESET risk.
  */
 export function extractAudioFromVideo(inputPath: string, outputPath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     console.log(`[FFmpeg] Extracting audio from: ${inputPath}`)
+    console.log(`[FFmpeg] Using compressed settings: 64k mono 16kHz`)
 
     ffmpeg(inputPath)
       .noVideo()
       .audioCodec("libmp3lame")
-      .audioBitrate("192k")
-      .audioChannels(2)
-      .audioFrequency(44100)
+      .audioBitrate("64k") // Reduced from 192k - sufficient for speech
+      .audioChannels(1) // Mono - halves data size
+      .audioFrequency(16000) // 16kHz - Whisper's native rate
       .output(outputPath)
       .on("start", (commandLine) => {
         console.log(`[FFmpeg] Command: ${commandLine}`)

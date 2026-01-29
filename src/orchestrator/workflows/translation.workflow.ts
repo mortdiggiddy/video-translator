@@ -1,11 +1,21 @@
 import { proxyActivities, defineQuery, setHandler } from "@temporalio/workflow"
 import type * as activities from "../activities"
 
-// Proxy activities to use within workflow
-const { extractAudio, transcribeAudio, translateText, generateSummary, generateSubtitles, generateOutputVideo, saveWorkflowArtifacts, cleanupTempFilesActivity } = proxyActivities<typeof activities>({
+// Proxy activities with default timeout (10 minutes)
+const { extractAudio, translateText, generateSummary, generateSubtitles, generateOutputVideo, saveWorkflowArtifacts, cleanupTempFilesActivity } = proxyActivities<typeof activities>({
   startToCloseTimeout: "10 minutes",
   retry: {
     maximumAttempts: 3,
+  },
+})
+
+// Separate proxy for transcription with longer timeout
+// Whisper API uploads can take a long time for large files
+// We handle retries manually in the activity (retryWithBackoff)
+const { transcribeAudio } = proxyActivities<typeof activities>({
+  startToCloseTimeout: "30 minutes", // 30 min for long videos
+  retry: {
+    maximumAttempts: 1, // No Temporal retries - we retry manually in activity
   },
 })
 

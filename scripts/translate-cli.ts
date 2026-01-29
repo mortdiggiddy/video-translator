@@ -61,9 +61,9 @@ interface WorkflowStatus {
 }
 
 /**
- * Make HTTP request to API
+ * Make HTTP request to API with timeout
  */
-function httpRequest<T>(method: string, urlPath: string, body?: unknown): Promise<T> {
+function httpRequest<T>(method: string, urlPath: string, body?: unknown, timeoutMs = 10000): Promise<T> {
   return new Promise((resolve, reject) => {
     const url = new URL(urlPath, API_URL)
 
@@ -72,6 +72,7 @@ function httpRequest<T>(method: string, urlPath: string, body?: unknown): Promis
       port: url.port || 3001,
       path: url.pathname,
       method,
+      timeout: timeoutMs,
       headers: body
         ? {
             "Content-Type": "application/json",
@@ -95,6 +96,11 @@ function httpRequest<T>(method: string, urlPath: string, body?: unknown): Promis
           reject(new Error(`Invalid response: ${data}`))
         }
       })
+    })
+
+    req.on("timeout", () => {
+      req.destroy()
+      reject(new Error("Request timeout"))
     })
 
     req.on("error", reject)
@@ -178,7 +184,23 @@ async function startTranslationWithFile(options: TranslateOptions): Promise<stri
     body += `Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n`
     body += `Content-Type: ${mimeType}\r\n\r\n`
 
-    const bodyBuffer = Buffer.concat([Buffer.from(body), fileContent, Buffer.from(`\r\n--${boundary}\r\n`), Buffer.from(`Content-Disposition: form-data; name="targetLanguage"\r\n\r\n${options.target}\r\n`), options.source ? Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="sourceLanguage"\r\n\r\n${options.source}\r\n`) : Buffer.from(""), Buffer.from(`--${boundary}--\r\n`)])
+    // Build the buffer parts
+    const parts: Buffer[] = [Buffer.from(body), fileContent, Buffer.from(`\r\n--${boundary}\r\n`), Buffer.from(`Content-Disposition: form-data; name="targetLanguage"\r\n\r\n${options.target}\r\n`)]
+
+    // Add optional sourceLanguage
+    if (options.source) {
+      parts.push(Buffer.from(`--${boundary}\r\n`))
+      parts.push(Buffer.from(`Content-Disposition: form-data; name="sourceLanguage"\r\n\r\n${options.source}\r\n`))
+    }
+
+    // Add hardcodeSubtitles option
+    parts.push(Buffer.from(`--${boundary}\r\n`))
+    parts.push(Buffer.from(`Content-Disposition: form-data; name="hardcodeSubtitles"\r\n\r\n${options.hardcode ? "true" : "false"}\r\n`))
+
+    // Close the multipart form
+    parts.push(Buffer.from(`--${boundary}--\r\n`))
+
+    const bodyBuffer = Buffer.concat(parts)
 
     const req = http.request(
       {

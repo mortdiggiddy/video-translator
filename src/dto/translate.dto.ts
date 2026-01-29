@@ -102,6 +102,15 @@ export class TranslateFileDto {
   @IsString()
   @IsOptional()
   sourceLanguage?: string
+
+  @ApiPropertyOptional({
+    description: "Whether to hardcode (burn-in) subtitles into the video",
+    example: "false",
+    default: "false",
+  })
+  @IsString() // Form data sends booleans as strings
+  @IsOptional()
+  hardcodeSubtitles?: string
 }
 
 /**

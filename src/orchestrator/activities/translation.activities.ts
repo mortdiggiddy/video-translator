@@ -11,23 +11,70 @@
 import OpenAI from "openai"
 import * as fs from "fs"
 import * as path from "path"
-import type {
-  TranscriptionResult,
-  TranslationResult,
-  SummaryResult,
-  AudioExtractionResult,
-  SubtitleGenerationResult,
-  GenerateOutputVideoInput,
-  GenerateOutputVideoResult,
-  SaveArtifactsInput,
-  SaveArtifactsResult,
-} from "./types"
+import * as https from "https"
+import type { TranscriptionResult, TranslationResult, SummaryResult, AudioExtractionResult, SubtitleGenerationResult, GenerateOutputVideoInput, GenerateOutputVideoResult, SaveArtifactsInput, SaveArtifactsResult } from "./types"
 import { processMediaInput, isVideoFile, isAudioFile, cleanupTempFiles, generateVideoWithSubtitles, ensureOutputDir } from "./ffmpeg.utils"
 
-// Initialize OpenAI client - will use OPENAI_API_KEY from environment
+// Create HTTPS agent with keepalive to prevent ECONNRESET on long uploads
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 10,
+  keepAliveMsecs: 30000,
+})
+
+// Initialize OpenAI client with keepalive agent for stable connections
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  httpAgent: httpsAgent,
+  timeout: 120000, // 2 minute timeout for large uploads
+  maxRetries: 0, // We handle retries manually for better control
 })
+
+// ==========================================
+// Retry Helper for API Calls
+// ==========================================
+
+/**
+ * Retry wrapper for API calls with exponential backoff
+ * Use for network-sensitive operations like Whisper uploads
+ */
+async function retryWithBackoff<T>(fn: () => Promise<T>, options: { attempts?: number; delayMs?: number; operation?: string } = {}): Promise<T> {
+  const { attempts = 3, delayMs = 1000, operation = "API call" } = options
+  let lastError: Error | unknown
+
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastError = err
+      const isLastAttempt = i === attempts - 1
+      const errorCode = (err as { code?: string })?.code
+      const errorMessage = err instanceof Error ? err.message : String(err)
+
+      console.warn(`[Retry] ${operation} attempt ${i + 1}/${attempts} failed: ${errorMessage}`)
+
+      if (isLastAttempt) {
+        console.error(`[Retry] ${operation} exhausted all ${attempts} attempts`)
+        break
+      }
+
+      // Only retry on connection errors, not on API errors (400, 401, etc)
+      if (errorCode !== "ECONNRESET" && errorCode !== "ETIMEDOUT" && errorCode !== "ENOTFOUND") {
+        const status = (err as { status?: number })?.status
+        if (status && status >= 400 && status < 500) {
+          console.error(`[Retry] ${operation} received client error ${status}, not retrying`)
+          break
+        }
+      }
+
+      const backoffMs = delayMs * Math.pow(2, i)
+      console.log(`[Retry] Waiting ${backoffMs}ms before retry...`)
+      await new Promise((r) => setTimeout(r, backoffMs))
+    }
+  }
+
+  throw lastError
+}
 
 // Track temp files for cleanup
 const tempFilesCreated: string[] = []
@@ -103,39 +150,54 @@ export async function extractAudio(videoUrl: string): Promise<AudioExtractionRes
 /**
  * Activity: Transcribe audio to text using OpenAI Whisper API
  * Converts audio/video to text with timestamps
+ *
+ * Uses retry wrapper to handle ECONNRESET errors from long uploads
  */
 export async function transcribeAudio(audioPath: string, sourceLanguage?: string): Promise<TranscriptionResult> {
   console.log(`[Activity] Transcribing audio: ${audioPath}`)
 
-  try {
-    // Check if it's a local file
-    if (fs.existsSync(audioPath)) {
-      // Local file - use file upload
-      const transcription = await openai.audio.transcriptions.create({
-        file: fs.createReadStream(audioPath),
-        model: "whisper-1",
-        response_format: "verbose_json",
-        timestamp_granularities: ["segment"],
-        language: sourceLanguage || undefined,
-      })
+  // Check if file exists first (outside retry loop)
+  if (!fs.existsSync(audioPath)) {
+    console.error(`[Activity] Audio file not found: ${audioPath}`)
+    throw new Error(`Audio file not found: ${audioPath}`)
+  }
 
-      return {
-        text: transcription.text,
-        language: transcription.language || sourceLanguage || "en",
-        segments:
-          transcription.segments?.map((seg) => ({
-            start: seg.start,
-            end: seg.end,
-            text: seg.text,
-          })) || [],
-      }
-    } else {
-      // File doesn't exist - this shouldn't happen after extractAudio
-      console.error(`[Activity] Audio file not found: ${audioPath}`)
-      throw new Error(`Audio file not found: ${audioPath}`)
+  // Log file size for debugging
+  const stats = fs.statSync(audioPath)
+  const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2)
+  console.log(`[Activity] Audio file size: ${fileSizeMB} MB`)
+
+  try {
+    // Wrap the API call with retry for connection resilience
+    const transcription = await retryWithBackoff(
+      async () => {
+        // Create fresh stream for each attempt (streams can't be reused)
+        const fileStream = fs.createReadStream(audioPath)
+        return openai.audio.transcriptions.create({
+          file: fileStream,
+          model: "whisper-1",
+          response_format: "verbose_json",
+          timestamp_granularities: ["segment"],
+          language: sourceLanguage || undefined,
+        })
+      },
+      { attempts: 3, delayMs: 2000, operation: "Whisper transcription" },
+    )
+
+    console.log(`[Activity] Transcription completed, detected language: ${transcription.language}`)
+
+    return {
+      text: transcription.text,
+      language: transcription.language || sourceLanguage || "en",
+      segments:
+        transcription.segments?.map((seg) => ({
+          start: seg.start,
+          end: seg.end,
+          text: seg.text,
+        })) || [],
     }
   } catch (error) {
-    console.error("[Activity] Transcription error:", error)
+    console.error("[Activity] Transcription error after all retries:", error)
     throw error
   }
 }
@@ -226,11 +288,7 @@ Format your response as JSON:
  * Activity: Generate subtitles file from translated segments
  * Creates both SRT and VTT subtitle files
  */
-export async function generateSubtitles(
-  segments: Array<{ start: number; end: number; text: string }>,
-  translatedText: string,
-  targetLanguage: string
-): Promise<SubtitleGenerationResult> {
+export async function generateSubtitles(segments: Array<{ start: number; end: number; text: string }>, translatedText: string, targetLanguage: string): Promise<SubtitleGenerationResult> {
   console.log(`[Activity] Generating subtitles in ${targetLanguage}`)
 
   try {

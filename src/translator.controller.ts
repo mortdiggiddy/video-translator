@@ -93,6 +93,11 @@ export class TranslatorController {
           example: "English",
           description: "Source language (optional, auto-detected if not provided)",
         },
+        hardcodeSubtitles: {
+          type: "string",
+          example: "false",
+          description: "Whether to burn subtitles into video (true/false)",
+        },
       },
     },
   })
@@ -106,11 +111,18 @@ export class TranslatorController {
 
     // Convert file upload to video URL DTO
     // Pass original filename for workflow ID generation
+    // Note: Form data sends booleans as strings, so we parse it
+    const hardcodeSubtitles = dto.hardcodeSubtitles === "true"
+
     const translateDto: TranslateVideoDto = {
       videoUrl: file.path,
       targetLanguage: dto.targetLanguage,
       sourceLanguage: dto.sourceLanguage,
       fileName: file.originalname, // Pass original filename for workflow ID
+      outputOptions: {
+        hardcodeSubtitles,
+        generateVideo: true,
+      },
     }
 
     return this.translatorService.startTranslation(translateDto)

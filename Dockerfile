@@ -4,9 +4,10 @@
 # Using debian-based image instead of alpine because Temporal SDK requires glibc
 FROM node:20-slim AS development
 
-# Install required packages including ffmpeg for audio extraction
+# Install required packages including ffmpeg for audio extraction, ca-certificates for HTTPS,
+# and procps for the 'ps' command needed by fluent-ffmpeg progress tracking
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends bash git curl ffmpeg && \
+    apt-get install -y --no-install-recommends bash git curl ffmpeg ca-certificates procps && \
     rm -rf /var/lib/apt/lists/* && \
     npm install -g pnpm@9.14.1
 
@@ -47,9 +48,10 @@ RUN pnpm prune --prod
 # ==========================================
 FROM node:20-slim AS production
 
-# Install ffmpeg for audio extraction at runtime
+# Install ffmpeg for audio extraction at runtime, ca-certificates for HTTPS,
+# and procps for the 'ps' command needed by fluent-ffmpeg progress tracking
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get install -y --no-install-recommends ffmpeg ca-certificates procps && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
