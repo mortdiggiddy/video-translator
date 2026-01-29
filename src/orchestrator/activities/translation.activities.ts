@@ -5,12 +5,24 @@
  * - FFmpeg for audio extraction from video
  * - OpenAI Whisper API for transcription
  * - GPT-4 for translation and summarization
+ * - FFmpeg for subtitle overlay on video
  */
 
 import OpenAI from "openai"
 import * as fs from "fs"
-import type { TranscriptionResult, TranslationResult, SummaryResult } from "./types"
-import { processMediaInput, isVideoFile, isAudioFile, cleanupTempFiles } from "./ffmpeg.utils"
+import * as path from "path"
+import type {
+  TranscriptionResult,
+  TranslationResult,
+  SummaryResult,
+  AudioExtractionResult,
+  SubtitleGenerationResult,
+  GenerateOutputVideoInput,
+  GenerateOutputVideoResult,
+  SaveArtifactsInput,
+  SaveArtifactsResult,
+} from "./types"
+import { processMediaInput, isVideoFile, isAudioFile, cleanupTempFiles, generateVideoWithSubtitles, ensureOutputDir } from "./ffmpeg.utils"
 
 // Initialize OpenAI client - will use OPENAI_API_KEY from environment
 const openai = new OpenAI({
@@ -55,22 +67,25 @@ function pad(num: number, size: number = 2): string {
  * - Audio files (passes through)
  *
  * @param videoUrl - URL or local path to video/audio file
- * @returns Local path to extracted audio file
+ * @returns AudioExtractionResult with audioPath and optionally originalVideoPath
  */
-export async function extractAudio(videoUrl: string): Promise<string> {
+export async function extractAudio(videoUrl: string): Promise<AudioExtractionResult> {
   console.log(`[Activity] Extracting audio from: ${videoUrl}`)
 
   try {
     // Process the input (download if URL, extract audio if video)
-    const audioPath = await processMediaInput(videoUrl)
+    const result = await processMediaInput(videoUrl)
 
     // Track for cleanup
-    if (audioPath.startsWith("/tmp")) {
-      tempFilesCreated.push(audioPath)
+    if (result.audioPath.startsWith("/tmp")) {
+      tempFilesCreated.push(result.audioPath)
+    }
+    if (result.originalVideoPath?.startsWith("/tmp")) {
+      tempFilesCreated.push(result.originalVideoPath)
     }
 
-    console.log(`[Activity] Audio ready at: ${audioPath}`)
-    return audioPath
+    console.log(`[Activity] Audio ready at: ${result.audioPath}`)
+    return result
   } catch (error) {
     console.error("[Activity] Audio extraction error:", error)
 
@@ -78,7 +93,7 @@ export async function extractAudio(videoUrl: string): Promise<string> {
     // OpenAI Whisper can handle some formats directly
     if (isAudioFile(videoUrl) || !isVideoFile(videoUrl)) {
       console.log("[Activity] Falling back to original input")
-      return videoUrl
+      return { audioPath: videoUrl }
     }
 
     throw error
@@ -209,10 +224,14 @@ Format your response as JSON:
 
 /**
  * Activity: Generate subtitles file from translated segments
- * Creates SRT or VTT subtitle file
+ * Creates both SRT and VTT subtitle files
  */
-export async function generateSubtitles(segments: Array<{ start: number; end: number; text: string }>, translatedText: string, format: "srt" | "vtt" = "srt"): Promise<string> {
-  console.log(`[Activity] Generating ${format.toUpperCase()} subtitles`)
+export async function generateSubtitles(
+  segments: Array<{ start: number; end: number; text: string }>,
+  translatedText: string,
+  targetLanguage: string
+): Promise<SubtitleGenerationResult> {
+  console.log(`[Activity] Generating subtitles in ${targetLanguage}`)
 
   try {
     // If we have segments, translate each segment
@@ -228,8 +247,8 @@ export async function generateSubtitles(segments: Array<{ start: number; end: nu
             content: `You are a subtitle generator. Given the original segment timings and the full translated text, 
 distribute the translated text across the segments maintaining the original timing structure.
 
-Output as JSON array:
-[{"start": 0, "end": 5, "text": "translated segment text"}, ...]`,
+Output as JSON with a "segments" array:
+{"segments": [{"start": 0, "end": 5, "text": "translated segment text"}, ...]}`,
           },
           {
             role: "user",
@@ -244,32 +263,133 @@ ${translatedText}`,
         response_format: { type: "json_object" },
       })
 
-      const content = response.choices[0]?.message?.content || "[]"
+      const content = response.choices[0]?.message?.content || '{"segments":[]}'
       const parsed = JSON.parse(content)
       translatedSegments = Array.isArray(parsed) ? parsed : parsed.segments || segments
     }
 
-    // Generate subtitle file content
-    let subtitleContent = ""
+    // Generate SRT content
+    let srtContent = ""
+    translatedSegments.forEach((seg, index) => {
+      srtContent += `${index + 1}\n`
+      srtContent += `${formatTime(seg.start, "srt")} --> ${formatTime(seg.end, "srt")}\n`
+      srtContent += `${seg.text}\n\n`
+    })
 
-    if (format === "vtt") {
-      subtitleContent = "WEBVTT\n\n"
-      translatedSegments.forEach((seg) => {
-        subtitleContent += `${formatTime(seg.start, "vtt")} --> ${formatTime(seg.end, "vtt")}\n`
-        subtitleContent += `${seg.text}\n\n`
-      })
-    } else {
-      // SRT format
-      translatedSegments.forEach((seg, index) => {
-        subtitleContent += `${index + 1}\n`
-        subtitleContent += `${formatTime(seg.start, "srt")} --> ${formatTime(seg.end, "srt")}\n`
-        subtitleContent += `${seg.text}\n\n`
-      })
+    // Generate VTT content
+    let vttContent = "WEBVTT\n\n"
+    translatedSegments.forEach((seg) => {
+      vttContent += `${formatTime(seg.start, "vtt")} --> ${formatTime(seg.end, "vtt")}\n`
+      vttContent += `${seg.text}\n\n`
+    })
+
+    // Save to temp directory
+    const subtitleId = Date.now().toString()
+    const srtPath = path.join("/tmp/video-translator", `subtitles-${subtitleId}.srt`)
+    const vttPath = path.join("/tmp/video-translator", `subtitles-${subtitleId}.vtt`)
+
+    // Ensure temp dir exists
+    if (!fs.existsSync("/tmp/video-translator")) {
+      fs.mkdirSync("/tmp/video-translator", { recursive: true })
     }
 
-    return subtitleContent
+    fs.writeFileSync(srtPath, srtContent, "utf-8")
+    fs.writeFileSync(vttPath, vttContent, "utf-8")
+
+    tempFilesCreated.push(srtPath, vttPath)
+
+    return {
+      srtPath,
+      vttPath,
+      srtContent,
+      vttContent,
+    }
   } catch (error) {
     console.error("[Activity] Subtitles error:", error)
+    throw error
+  }
+}
+
+/**
+ * Activity: Generate output video with subtitle overlay
+ */
+export async function generateOutputVideo(input: GenerateOutputVideoInput): Promise<GenerateOutputVideoResult> {
+  console.log(`[Activity] Generating output video with subtitles`)
+  console.log(`  Video: ${input.videoPath}`)
+  console.log(`  Subtitles: ${input.srtPath}`)
+  console.log(`  Hardcode: ${input.hardcode ?? false}`)
+
+  try {
+    // Ensure output directory exists
+    const workflowDir = ensureOutputDir(input.workflowId)
+
+    // Determine output filename
+    const outputFilename = input.hardcode ? "translated_video_hardcoded.mp4" : "translated_video.mp4"
+    const outputPath = path.join(workflowDir, outputFilename)
+
+    // Generate video with subtitles
+    await generateVideoWithSubtitles(input.videoPath, input.srtPath, outputPath, input.hardcode ?? false)
+
+    return {
+      outputPath,
+      format: "mp4",
+      subtitleType: input.hardcode ? "hardcoded" : "softcoded",
+    }
+  } catch (error) {
+    console.error("[Activity] Output video generation error:", error)
+    throw error
+  }
+}
+
+/**
+ * Activity: Save all workflow artifacts to output directory
+ */
+export async function saveWorkflowArtifacts(input: SaveArtifactsInput): Promise<SaveArtifactsResult> {
+  console.log(`[Activity] Saving workflow artifacts for: ${input.workflowId}`)
+
+  try {
+    // Ensure output directory exists
+    const workflowDir = ensureOutputDir(input.workflowId)
+    const savedFiles: string[] = []
+
+    // Save subtitles
+    const srtPath = path.join(workflowDir, "subtitles.srt")
+    const vttPath = path.join(workflowDir, "subtitles.vtt")
+    fs.writeFileSync(srtPath, input.srtContent, "utf-8")
+    fs.writeFileSync(vttPath, input.vttContent, "utf-8")
+    savedFiles.push(srtPath, vttPath)
+
+    // Save metadata JSON
+    const metadata = {
+      workflowId: input.workflowId,
+      sourceLanguage: input.sourceLanguage,
+      targetLanguage: input.targetLanguage,
+      transcription: input.transcription,
+      translation: input.translation,
+      summary: input.summary,
+      keyPoints: input.keyPoints,
+      outputVideoPath: input.outputVideoPath,
+      createdAt: new Date().toISOString(),
+    }
+    const metadataPath = path.join(workflowDir, "metadata.json")
+    fs.writeFileSync(metadataPath, JSON.stringify(metadata, null, 2), "utf-8")
+    savedFiles.push(metadataPath)
+
+    // Save plain text files for transcription and translation
+    const transcriptionPath = path.join(workflowDir, "transcription.txt")
+    const translationPath = path.join(workflowDir, "translation.txt")
+    fs.writeFileSync(transcriptionPath, input.transcription, "utf-8")
+    fs.writeFileSync(translationPath, input.translation, "utf-8")
+    savedFiles.push(transcriptionPath, translationPath)
+
+    console.log(`[Activity] Saved ${savedFiles.length} artifacts to: ${workflowDir}`)
+
+    return {
+      artifactsDir: workflowDir,
+      files: savedFiles,
+    }
+  } catch (error) {
+    console.error("[Activity] Artifact saving error:", error)
     throw error
   }
 }

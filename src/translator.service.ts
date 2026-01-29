@@ -108,4 +108,31 @@ export class TranslatorService {
       throw new WorkflowException(`Failed to get workflow status: ${errorMsg}`)
     }
   }
+
+  /**
+   * Get the progress of a translation workflow (real-time progress query)
+   */
+  async getTranslationProgress(workflowId: string) {
+    this.logger.log(`Getting progress for workflow: ${workflowId}`)
+
+    try {
+      const progress = await this.temporalClient.queryWorkflowProgress(workflowId)
+      return progress
+    } catch (error) {
+      const errorMsg = getErrorMessage(error)
+      this.logger.error(`Failed to get workflow progress: ${errorMsg}`, error instanceof Error ? error.stack : undefined)
+
+      // Check for not found errors from Temporal
+      if (errorContains(error, "not found", "NOT_FOUND")) {
+        throw new WorkflowNotFoundException(workflowId)
+      }
+
+      // Check for connection errors
+      if (errorContains(error, "connection", "UNAVAILABLE")) {
+        throw new TemporalConnectionException("Temporal server is unavailable. Please try again later.")
+      }
+
+      throw new WorkflowException(`Failed to get workflow progress: ${errorMsg}`)
+    }
+  }
 }

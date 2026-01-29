@@ -1,5 +1,6 @@
-import { IsString, IsOptional, IsNotEmpty, MinLength } from "class-validator"
+import { IsString, IsOptional, IsNotEmpty, MinLength, IsBoolean, ValidateNested } from "class-validator"
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger"
+import { Type } from "class-transformer"
 
 /**
  * Supported target languages for translation
@@ -7,6 +8,29 @@ import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger"
 export const SUPPORTED_LANGUAGES = ["Spanish", "French", "German", "Italian", "Portuguese", "Chinese", "Japanese", "Korean", "Arabic", "Russian", "Hindi", "Dutch", "Polish", "Turkish", "Vietnamese", "Thai", "Indonesian", "Malay", "Swedish", "Norwegian", "Danish", "Finnish", "Greek", "Hebrew", "Czech", "Romanian", "Hungarian", "Ukrainian"] as const
 
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number]
+
+/**
+ * Output options for the translation workflow
+ */
+export class OutputOptionsDto {
+  @ApiPropertyOptional({
+    description: "Whether to hardcode (burn-in) subtitles into the video",
+    example: false,
+    default: false,
+  })
+  @IsBoolean()
+  @IsOptional()
+  hardcodeSubtitles?: boolean
+
+  @ApiPropertyOptional({
+    description: "Whether to generate the output video with subtitles",
+    example: true,
+    default: true,
+  })
+  @IsBoolean()
+  @IsOptional()
+  generateVideo?: boolean
+}
 
 /**
  * DTO for starting a translation workflow
@@ -30,7 +54,7 @@ export class TranslateVideoDto {
   @IsNotEmpty({ message: "targetLanguage is required" })
   targetLanguage: string
 
-  @ApiPropertyOptional({
+  @ApiPropertyOptional({ 
     description: "Source language of the video (optional, auto-detected if not provided)",
     example: "English",
     default: "English",
@@ -38,6 +62,15 @@ export class TranslateVideoDto {
   @IsString()
   @IsOptional()
   sourceLanguage?: string
+
+  @ApiPropertyOptional({
+    description: "Output options for video generation",
+    type: OutputOptionsDto,
+  })
+  @ValidateNested()
+  @Type(() => OutputOptionsDto)
+  @IsOptional()
+  outputOptions?: OutputOptionsDto
 }
 
 /**

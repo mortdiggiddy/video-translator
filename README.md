@@ -12,8 +12,10 @@ A NestJS microservice for video translation using **Temporal** for workflow orch
 - **FFmpeg Integration**: Automatic audio extraction from video files
 - **OpenAI Whisper**: Speech-to-text transcription with timestamps
 - **GPT-4 Translation**: Professional-quality translation
-- **Subtitle Generation**: SRT/VTT subtitle files
-- **Temporal Workflows**: Durable, fault-tolerant execution
+- **Subtitle Generation**: SRT/VTT subtitle files with timestamps
+- **Video Output**: Generate translated video with embedded subtitles (hardcoded or softcoded)
+- **CLI Tools**: Command-line interface with real-time progress tracking
+- **Temporal Workflows**: Durable, fault-tolerant 7-step execution with progress queries
 - **Swagger Documentation**: Interactive API explorer at `/api`
 
 ## Quick Start
@@ -87,7 +89,44 @@ pnpm start:prod
 
 ## Usage Examples
 
-### Method 1: URL-Based Translation
+### Method 1: CLI Tool (Recommended)
+
+Use the command-line interface with real-time progress tracking:
+
+```bash
+# Translate from URL
+pnpm translate --url https://example.com/video.mp4 --target Spanish
+
+# Translate from local file
+pnpm translate --file ./video.mp4 --target French
+
+# Translate with hardcoded (burned-in) subtitles
+pnpm translate --url https://example.com/video.mp4 --target German --hardcode
+
+# Specify source language
+pnpm translate --url https://example.com/video.mp4 --target Spanish --source English
+```
+
+**CLI Progress Output:**
+
+```
+🎬 Video Translator CLI
+
+──────────────────────────────────────────────────
+Source: https://example.com/video.mp4
+Target Language: Spanish
+Subtitle Mode: Softcoded (selectable)
+──────────────────────────────────────────────────
+
+Starting translation workflow...
+Workflow started: translation-1706518800000-abc123
+
+⏳ Translation Progress
+
+█████████████░░░░░░░░░ 65% | Step 5/7: Generating subtitles
+```
+
+### Method 2: REST API (URL-Based)
 
 Submit a URL to a video/audio file:
 
@@ -97,11 +136,15 @@ curl -X POST http://localhost:3001/translate \
   -d '{
     "videoUrl": "https://example.com/video.mp4",
     "targetLanguage": "Spanish",
-    "sourceLanguage": "English"
+    "sourceLanguage": "English",
+    "outputOptions": {
+      "hardcodeSubtitles": false,
+      "generateVideo": true
+    }
   }'
 ```
 
-### Method 2: File Upload
+### Method 3: REST API (File Upload)
 
 Upload a file directly:
 
@@ -116,6 +159,13 @@ curl -X POST http://localhost:3001/translate/upload \
 
 ```bash
 curl http://localhost:3001/translate/{workflowId}
+```
+
+### Download Workflow Output (CLI)
+
+```bash
+# Download all artifacts from a completed workflow
+pnpm translate:get <workflowId> --output ./my-translations/
 ```
 
 ### Example Responses
@@ -149,11 +199,26 @@ curl http://localhost:3001/translate/{workflowId}
     "transcription": "Hello, this is a test video...",
     "translation": "Hola, este es un video de prueba...",
     "summary": "A brief test video with greeting.",
-    "subtitlesPath": "/tmp/subtitles_123.srt",
-    "processingTimeMs": 15000
+    "keyPoints": ["Point 1", "Point 2", "Point 3"],
+    "subtitlesPath": "/output/video-translator/translation-xxx/subtitles.srt",
+    "outputVideoPath": "/output/video-translator/translation-xxx/translated_video.mp4",
+    "artifactsDir": "/output/video-translator/translation-xxx",
+    "processingTimeMs": 45000
   }
 }
 ```
+
+### Output Options
+
+| Option              | Type    | Default | Description                           |
+| ------------------- | ------- | ------- | ------------------------------------- |
+| `hardcodeSubtitles` | boolean | `false` | Burn subtitles into video (permanent) |
+| `generateVideo`     | boolean | `true`  | Generate video with subtitle overlay  |
+
+**Subtitle Modes:**
+
+- **Softcoded** (default): Subtitles as separate track, togglable in video player
+- **Hardcoded**: Subtitles burned into video pixels, always visible
 
 ## Supported File Formats
 
@@ -182,20 +247,29 @@ video-translator/
 │   ├── translator.controller.ts   # HTTP endpoints
 │   ├── translator.service.ts      # Business logic
 │   ├── dto/                       # Request/Response DTOs
+│   │   └── translate.dto.ts       # Translation DTOs with validation
 │   ├── common/
 │   │   ├── exceptions/            # Custom exceptions
 │   │   └── filters/               # Exception filters
 │   └── orchestrator/
-│       ├── activities/            # Temporal activities
-│       │   ├── translation.activities.ts
-│       │   ├── ffmpeg.utils.ts
-│       │   └── types.ts
+│       ├── activities/            # Temporal activities (7 activities)
+│       │   ├── translation.activities.ts  # All 7 activities
+│       │   ├── ffmpeg.utils.ts    # FFmpeg wrappers, subtitle overlay
+│       │   ├── types.ts           # Activity type definitions
+│       │   └── index.ts           # Barrel exports
 │       ├── workflows/             # Temporal workflows
+│       │   ├── translation.workflow.ts  # 7-step workflow with progress query
+│       │   └── index.ts           # Barrel exports
 │       └── clients/               # Temporal client
+│           └── temporal-client.service.ts  # Workflow start, status, progress query
+├── scripts/                       # CLI tools
+│   ├── translate-cli.ts           # CLI with progress bar
+│   └── translate-get.ts           # Download workflow outputs
 ├── scripts/temporal/              # Temporal configuration
-├── docker-compose.yml             # Docker orchestration
-├── Dockerfile                     # Container build
+├── docker-compose.yml             # Docker orchestration (5 services)
+├── Dockerfile                     # Container build (node:20-slim + ffmpeg)
 ├── package.json                   # Dependencies (pnpm)
+├── output/                        # Workflow output directory (volume mount)
 └── .env.example                   # Environment template
 ```
 
@@ -203,30 +277,42 @@ video-translator/
 
 Environment variables are defined in `.env`:
 
-| Variable                  | Description        | Default               |
-| ------------------------- | ------------------ | --------------------- |
-| `SERVICE_NAME`            | Service identifier | `video-translator`    |
-| `PORT`                    | HTTP server port   | `3001`                |
-| `NODE_ENV`                | Environment mode   | `development`         |
-| `TEMPORAL_SERVER_ADDRESS` | Temporal server    | `temporal:7233`       |
-| `TEMPORAL_NAMESPACE`      | Temporal namespace | `default`             |
-| `OPENAI_API_KEY`          | OpenAI API key     | (required)            |
-| `OPENAI_MODEL`            | GPT model to use   | `gpt-4-turbo-preview` |
+| Variable                  | Description               | Default                    |
+| ------------------------- | ------------------------- | -------------------------- |
+| `SERVICE_NAME`            | Service identifier        | `video-translator`         |
+| `PORT`                    | HTTP server port          | `3001`                     |
+| `NODE_ENV`                | Environment mode          | `development`              |
+| `TEMPORAL_SERVER_ADDRESS` | Temporal server           | `temporal:7233`            |
+| `TEMPORAL_NAMESPACE`      | Temporal namespace        | `default`                  |
+| `OPENAI_API_KEY`          | OpenAI API key            | (required)                 |
+| `OPENAI_MODEL`            | GPT model to use          | `gpt-4-turbo-preview`      |
+| `OUTPUT_DIR`              | Workflow output directory | `/output/video-translator` |
+| `TEMP_DIR`                | Temporary file directory  | `/tmp/video-translator`    |
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Temporal Server                           │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │                 Translation Workflow                        │ │
-│  │  ┌─────────┐  ┌──────────┐  ┌───────────┐  ┌────────────┐ │ │
-│  │  │ Extract │→ │Transcribe│→ │ Translate │→ │ Generate   │ │ │
-│  │  │ Audio   │  │(Whisper) │  │(GPT-4)    │  │ Subtitles  │ │ │
-│  │  │(FFmpeg) │  │          │  │           │  │ & Summary  │ │ │
-│  │  └─────────┘  └──────────┘  └───────────┘  └────────────┘ │ │
-│  └────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         7-Step Translation Workflow                          │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────┐   ┌──────────┐   ┌───────────┐   ┌──────────┐   ┌───────────┐   │
+│  │ 1.      │   │ 2.       │   │ 3.        │   │ 4.       │   │ 5.        │   │
+│  │ Extract │ → │Transcribe│ → │ Translate │ → │ Generate │ → │ Generate  │   │
+│  │ Audio   │   │(Whisper) │   │(GPT-4)    │   │ Summary  │   │ Subtitles │   │
+│  │(FFmpeg) │   │          │   │           │   │(GPT-4)   │   │           │   │
+│  └─────────┘   └──────────┘   └───────────┘   └──────────┘   └───────────┘   │
+│       │                                                             │        │
+│       │   ┌──────────────┐              ┌─────────────────────────┐ │        │
+│       └──→│ 6. Generate  │─────────────→│ 7. Save Artifacts       │─┘        │
+│           │ Output Video │              │ (metadata, subtitles,   │          │
+│           │ (FFmpeg)     │              │  text files)            │          │
+│           └──────────────┘              └─────────────────────────┘          │
+│                                                                              │
+│  Progress Query:  ═══════════════════════════════════════════════►  100%     │
+│                   │       │        │        │        │        │        │     │
+│                   5%     20%      40%      55%      70%      85%      95%    │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Development
@@ -288,7 +374,8 @@ Traditional REST APIs struggle with this because:
 | **Server crashes**        | Automatic resume from last checkpoint          |
 | **API rate limits**       | Built-in retry with exponential backoff        |
 | **Debugging failures**    | Full execution history in web UI               |
-| **Complex orchestration** | Manages state machine for 5-step pipeline      |
+| **Progress queries**      | Real-time progress tracking via query API      |
+| **Complex orchestration** | Manages state machine for 7-step pipeline      |
 
 **Temporal's Durable Execution Model:**
 
@@ -347,12 +434,12 @@ With Temporal:
 - Automatic exponential backoff on failure
 ```
 
-Each of the 5 activities is checkpointed. If GPT-4 returns an error during translation:
+Each of the 7 activities is checkpointed. If GPT-4 returns an error during translation:
 
 1. Temporal automatically retries up to 3 times
 2. If all retries fail, the workflow pauses
 3. You can fix the issue and replay from the failed step
-4. Successful steps (download, extraction, transcription) are NOT re-run
+4. Successful steps (audio extraction, transcription, etc.) are NOT re-run
 
 ### Monitoring & Debugging
 

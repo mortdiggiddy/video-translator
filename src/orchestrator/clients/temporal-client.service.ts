@@ -78,14 +78,30 @@ export class TemporalClientService implements OnModuleInit, OnModuleDestroy, OnA
 
   /**
    * Start a translation workflow
+   *
+   * @param input - Workflow input matching TranslationWorkflowInput interface
    */
-  async startTranslationWorkflow(input: { videoUrl: string; targetLanguage: string; sourceLanguage?: string }): Promise<{ workflowId: string; status: string }> {
+  async startTranslationWorkflow(input: {
+    videoUrl: string
+    targetLanguage: string
+    sourceLanguage?: string
+    outputOptions?: {
+      hardcodeSubtitles?: boolean
+      generateVideo?: boolean
+    }
+  }): Promise<{ workflowId: string; status: string }> {
     const workflowId = `translation-${Date.now()}-${Math.random().toString(36).substring(7)}`
 
     this.logger.log(`Starting translation workflow: ${workflowId}`)
 
+    // Build full workflow input with workflowId included
+    const workflowInput = {
+      ...input,
+      workflowId, // Pass workflowId so workflow can use it for artifact paths
+    }
+
     const handle = await this.client.start("translationWorkflow", {
-      args: [input],
+      args: [workflowInput],
       workflowId,
       taskQueue: "translation-queue",
     })
@@ -111,6 +127,73 @@ export class TemporalClientService implements OnModuleInit, OnModuleDestroy, OnA
       workflowId,
       status: description.status.name,
       result: description.status.name === "COMPLETED" ? await handle.result() : undefined,
+    }
+  }
+
+  /**
+   * Query workflow progress using Temporal query mechanism
+   *
+   * @param workflowId - The workflow ID to query
+   * @returns WorkflowProgress object with current step, percentage, etc.
+   */
+  async queryWorkflowProgress(workflowId: string): Promise<{
+    currentStep: number
+    totalSteps: number
+    stepName: string
+    percentComplete: number
+    status: "running" | "completed" | "failed"
+    error?: string
+  }> {
+    try {
+      const handle = this.client.getHandle(workflowId)
+
+      // Check if workflow is still running
+      const description = await handle.describe()
+
+      if (description.status.name === "COMPLETED") {
+        return {
+          currentStep: 7,
+          totalSteps: 7,
+          stepName: "Completed",
+          percentComplete: 100,
+          status: "completed",
+        }
+      }
+
+      if (description.status.name === "TIMED_OUT" || description.status.name === "CANCELLED") {
+        return {
+          currentStep: 0,
+          totalSteps: 7,
+          stepName: description.status.name,
+          percentComplete: 0,
+          status: "failed",
+          error: `Workflow ${description.status.name.toLowerCase()}`,
+        }
+      }
+
+      // Query the workflow for progress
+      const progress = await handle.query<{
+        currentStep: number
+        totalSteps: number
+        stepName: string
+        percentComplete: number
+        status: "running" | "completed" | "failed"
+        error?: string
+      }>("getProgress")
+
+      return progress
+    } catch (error) {
+      this.logger.error(`Error querying workflow progress: ${error}`)
+
+      // If query fails, return unknown state
+      return {
+        currentStep: 0,
+        totalSteps: 7,
+        stepName: "Unknown",
+        percentComplete: 0,
+        status: "running",
+        error: error instanceof Error ? error.message : "Query failed",
+      }
     }
   }
 

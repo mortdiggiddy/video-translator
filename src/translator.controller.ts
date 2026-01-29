@@ -126,4 +126,31 @@ export class TranslatorController {
   async getTranslationStatus(@Param("workflowId") workflowId: string) {
     return this.translatorService.getTranslationStatus(workflowId)
   }
+
+  @Get("translate/:workflowId/progress")
+  @ApiTags("translation")
+  @ApiOperation({
+    summary: "Get workflow progress",
+    description: "Get the current progress of a running translation workflow",
+  })
+  @ApiParam({ name: "workflowId", description: "Unique workflow identifier", example: "translation-1706518800000-abc123" })
+  @ApiResponse({
+    status: 200,
+    description: "Workflow progress retrieved",
+    schema: {
+      type: "object",
+      properties: {
+        currentStep: { type: "number", example: 3 },
+        totalSteps: { type: "number", example: 7 },
+        stepName: { type: "string", example: "Translating text (GPT-4)" },
+        percentComplete: { type: "number", example: 40 },
+        status: { type: "string", enum: ["running", "completed", "failed"], example: "running" },
+        error: { type: "string", example: null },
+      },
+    },
+  })
+  @ApiResponse({ status: 404, description: "Workflow not found", type: ErrorResponseDto })
+  async getTranslationProgress(@Param("workflowId") workflowId: string) {
+    return this.translatorService.getTranslationProgress(workflowId)
+  }
 }

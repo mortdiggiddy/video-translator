@@ -20,6 +20,8 @@ services:
       # Mount source for hot reload in development
       - ./src:/usr/src/app/src
       - ./.env:/usr/src/app/.env
+      # Output directory for translated videos and artifacts
+      - ./output:/output/video-translator
       # Prevent overwriting node_modules
       - /usr/src/app/node_modules
     depends_on:
