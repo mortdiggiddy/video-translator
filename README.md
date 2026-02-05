@@ -257,12 +257,6 @@ Spanish, French, German, Italian, Portuguese, Chinese, Japanese, Korean, Arabic,
 
 ```
 video-translator/
-├── .kilocode/rules/memory-bank/   # Project documentation
-│   ├── projectbrief.md            # Project overview
-│   ├── productContext.md          # Why this exists
-│   ├── systemPatterns.md          # Architecture patterns
-│   ├── techContext.md             # Technical details
-│   └── progress.md                # Progress tracker
 ├── src/
 │   ├── main.ts                    # Application entry point
 │   ├── translator.module.ts       # Root NestJS module
