@@ -2,7 +2,7 @@ import { proxyActivities, defineQuery, setHandler } from "@temporalio/workflow"
 import type * as activities from "../activities"
 
 // Proxy activities with default timeout (10 minutes)
-const { extractAudio, translateText, generateSummary, generateSubtitles, generateOutputVideo, saveWorkflowArtifacts, cleanupTempFilesActivity } = proxyActivities<typeof activities>({
+const { extractAudio, translateText, generateSummary, generateOutputVideo, saveWorkflowArtifacts, cleanupTempFilesActivity } = proxyActivities<typeof activities>({
   startToCloseTimeout: "10 minutes",
   retry: {
     maximumAttempts: 3,
@@ -16,6 +16,13 @@ const { transcribeAudio } = proxyActivities<typeof activities>({
   startToCloseTimeout: "30 minutes", // 30 min for long videos
   retry: {
     maximumAttempts: 1, // No Temporal retries - we retry manually in activity
+  },
+})
+
+const { generateSubtitles } = proxyActivities<typeof activities>({
+  startToCloseTimeout: "30 minutes",
+  retry: {
+    maximumAttempts: 3,
   },
 })
 

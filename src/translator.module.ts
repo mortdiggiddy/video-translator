@@ -5,65 +5,70 @@ import * as Joi from "joi"
 import { TranslatorController } from "./translator.controller"
 import { TranslatorService } from "./translator.service"
 import { TemporalClientModule } from "./orchestrator/clients/temporal-client.module"
+import { join } from "path"
 
 @Module({
   imports: [
     ConfigModule.forRoot({
+      isGlobal: true,
+      cache: true,
+      envFilePath: [join(process.cwd(), ".env")],
+      validationSchema: Joi.object({
+        SERVICE_NAME: Joi.string().default("video-translator"),
+        PORT: Joi.number().default(3001),
+        NODE_ENV: Joi.string().valid("development", "production", "test").default("development"),
+
+        TEMPORAL_SERVER_ADDRESS: Joi.string().default("temporal:7233"),
+        TEMPORAL_NAMESPACE: Joi.string().default("default"),
+
+        OUTPUT_DIR: Joi.string().default("/output/video-translator"),
+        TEMP_DIR: Joi.string().default("/tmp/video-translator"),
+        UPLOAD_DIR: Joi.string().default("/tmp/video-translator/uploads"),
+
+        OPENAI_API_KEY: Joi.string().allow("").default(""),
+        OPENAI_MODEL: Joi.string().default("gpt-4o-mini"),
+      }),
+      validationOptions: {
+        abortEarly: false,
+        allowUnknown: true,
+      },
       load: [
         () => {
           const config = {
-            // Service
-            SERVICE_NAME: process.env.SERVICE_NAME || "video-translator",
-            PORT: parseInt(process.env.PORT || "3001", 10),
-            NODE_ENV: process.env.NODE_ENV || "development",
-
-            // Temporal
-            TEMPORAL_SERVER_ADDRESS: process.env.TEMPORAL_SERVER_ADDRESS || "temporal:7233",
-            TEMPORAL_NAMESPACE: process.env.TEMPORAL_NAMESPACE || "default",
-
-            // File paths
-            OUTPUT_DIR: process.env.OUTPUT_DIR || "/output/video-translator",
-            TEMP_DIR: process.env.TEMP_DIR || "/tmp/video-translator",
-            UPLOAD_DIR: process.env.UPLOAD_DIR || "/tmp/video-translator/uploads",
-
-            // OpenAI
-            OPENAI_API_KEY: process.env.OPENAI_API_KEY || "",
-            OPENAI_MODEL: process.env.OPENAI_MODEL || "gpt-4-turbo-preview",
+            service: {
+              name: process.env.SERVICE_NAME!,
+              port: Number(process.env.PORT!),
+              nodeEnv: process.env.NODE_ENV!,
+            },
+            temporal: {
+              serverAddress: process.env.TEMPORAL_SERVER_ADDRESS!,
+              namespace: process.env.TEMPORAL_NAMESPACE!,
+            },
+            paths: {
+              outputDir: process.env.OUTPUT_DIR!,
+              tempDir: process.env.TEMP_DIR!,
+              uploadDir: process.env.UPLOAD_DIR!,
+            },
+            openai: {
+              apiKey: process.env.OPENAI_API_KEY!,
+              model: process.env.OPENAI_MODEL!,
+            },
           }
 
-          const schema = Joi.object({
-            // Service
-            SERVICE_NAME: Joi.string().required(),
-            PORT: Joi.number().default(3001),
-            NODE_ENV: Joi.string().valid("development", "production", "test").default("development"),
+          console.log("[Config] Loaded configuration")
+          console.log(`[Config] Service: ${config.service.name}`)
+          console.log(`[Config] Node env: ${config.service.nodeEnv}`)
+          console.log(`[Config] Port: ${config.service.port}`)
+          console.log(`[Config] Temporal address: ${config.temporal.serverAddress}`)
+          console.log(`[Config] Temporal namespace: ${config.temporal.namespace}`)
+          console.log(`[Config] Output dir: ${config.paths.outputDir}`)
+          console.log(`[Config] Upload dir: ${config.paths.uploadDir}`)
+          console.log(`[Config] OpenAI model: ${config.openai.model}`)
+          console.log(`[Config] OpenAI key present: ${config.openai.apiKey ? "yes" : "no"}`)
 
-            // Temporal
-            TEMPORAL_SERVER_ADDRESS: Joi.string().required(),
-            TEMPORAL_NAMESPACE: Joi.string().default("default"),
-
-            // File paths
-            OUTPUT_DIR: Joi.string().default("/output/video-translator"),
-            TEMP_DIR: Joi.string().default("/tmp/video-translator"),
-            UPLOAD_DIR: Joi.string().default("/tmp/video-translator/uploads"),
-
-            // OpenAI
-            OPENAI_API_KEY: Joi.string().allow("").default(""),
-            OPENAI_MODEL: Joi.string().default("gpt-4-turbo-preview"),
-          })
-
-          const { value, error } = schema.validate(config, { allowUnknown: true })
-
-          if (error) {
-            throw new Error(`Config validation error: ${error.message}`)
-          }
-
-          console.log(`${config.SERVICE_NAME} configurations validated successfully.`)
-
-          return value
+          return config
         },
       ],
-      cache: true,
-      isGlobal: true,
     }),
     LoggerModule.forRoot({
       pinoHttp: {

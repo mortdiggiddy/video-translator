@@ -26,7 +26,7 @@ const httpsAgent = new https.Agent({
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   httpAgent: httpsAgent,
-  timeout: 120000, // 2 minute timeout for large uploads
+  timeout: 1800000, // 30 minutes,
   maxRetries: 0, // We handle retries manually for better control
 })
 
@@ -206,11 +206,12 @@ export async function transcribeAudio(audioPath: string, sourceLanguage?: string
  * Activity: Translate text to target language using GPT-4
  */
 export async function translateText(text: string, sourceLanguage: string, targetLanguage: string): Promise<TranslationResult> {
-  console.log(`[Activity] Translating from ${sourceLanguage} to ${targetLanguage}`)
+  const model = process.env.OPENAI_MODEL || "gpt-4-turbo-preview"
+  console.log(`[Activity] Translating from ${sourceLanguage} to ${targetLanguage} using [${model}]`)
 
   try {
     const response = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || "gpt-4-turbo-preview",
+      model,
       messages: [
         {
           role: "system",
